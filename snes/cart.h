@@ -8,16 +8,20 @@
 typedef struct Cart Cart;
 
 #include "snes.h"
+#include "gsu.h"
 #include "statehandler.h"
 
 struct Cart {
   Snes* snes;
-  uint8_t type;
+  uint8_t type;  /* 0=none, 1=LoROM, 2=HiROM, 3=ExHiROM, 4=LoROM+SuperFX */
 
   uint8_t* rom;
   uint32_t romSize;
   uint8_t* ram;
   uint32_t ramSize;
+
+  /* Super FX / GSU coprocessor (NULL if not present) */
+  Gsu* gsu;
 };
 
 // TODO: how to handle reset & load?

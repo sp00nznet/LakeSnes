@@ -80,7 +80,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     length -= 0x200; // and subtract from size
   }
   // check if we can load it
-  if(headers[used].cartType > 3) {
+  if(headers[used].cartType > 4) {
     printf("Failed to load rom: unsupported type (%d)\n", headers[used].cartType);
     return false;
   }
@@ -103,10 +103,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     test *= 2;
   }
   // load it
-  const char* typeNames[4] = {"(none)", "LoROM", "HiROM", "ExHiROM"};
+  const char* typeNames[5] = {"(none)", "LoROM", "HiROM", "ExHiROM", "LoROM+SuperFX"};
   printf("Loaded %s rom (%s)\n", typeNames[headers[used].cartType], headers[used].pal ? "PAL" : "NTSC");
   printf("\"%s\"\n", headers[used].name);
-  int bankSize = used >= 2 ? 0x10000 : 0x8000; // 0, 1: LoROM, else HiROM
+  int bankSize = (used >= 2 && used <= 3) ? 0x10000 : 0x8000; // 0, 1, 4+: LoROM, else HiROM
   printf(
     "%s banks: %d, ramsize: %d\n",
     bankSize == 0x8000 ? "32K" : "64K", newLength / bankSize, headers[used].chips > 0 ? headers[used].ramSize : 0
@@ -115,6 +115,21 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     snes->cart, headers[used].cartType,
     newData, newLength, headers[used].chips > 0 ? headers[used].ramSize : 0
   );
+  // Initialize Super FX / GSU if this is a Super FX cartridge
+  if(headers[used].cartType == 4) {
+    if(snes->cart->gsu != NULL) gsu_free(snes->cart->gsu);
+    snes->cart->gsu = gsu_init(snes);
+    // Super FX games have 64KB or 128KB of GSU work RAM
+    // exRamSize from header, or default to 64KB
+    uint32_t gsuRamSize = headers[used].exRamSize;
+    if(gsuRamSize < 0x10000) gsuRamSize = 0x10000; // minimum 64KB
+    if(gsuRamSize > 0x20000) gsuRamSize = 0x20000; // maximum 128KB
+    uint8_t* gsuRam = malloc(gsuRamSize);
+    memset(gsuRam, 0, gsuRamSize);
+    gsu_load(snes->cart->gsu, snes->cart->rom, snes->cart->romSize, gsuRam, gsuRamSize);
+    gsu_power(snes->cart->gsu);
+    printf("Super FX GSU-2 initialized (%d KB work RAM)\n", gsuRamSize / 1024);
+  }
   snes_reset(snes, true); // reset after loading
   snes->palTiming = headers[used].pal; // set region
   free(newData);
@@ -255,6 +270,11 @@ static void readHeader(const uint8_t* data, int length, int location, CartHeader
   header->pal = (header->region >= 0x2 && header->region <= 0xc) || header->region == 0x11;
   header->cartType = location < 0x9000 ? 1 : 2;
   if(location > 0x400000) header->cartType = 3;
+  // Detect Super FX: coprocessor type 1 in $FFD6 high nibble, or chips field indicates GSU
+  // $FFD6: high nibble = coprocessor (1=GSU), low nibble = chips (3=copro+RAM+battery, A=copro+RAM)
+  if(header->coprocessor == 1 && header->cartType == 1) {
+    header->cartType = 4; // LoROM + Super FX
+  }
   // get score
   // TODO: check name, maker/game-codes (if V3) for ASCII, more vectors,
   //   more first opcode, rom-sizes (matches?), type (matches header location?)
