@@ -1,9 +1,18 @@
-# LakeSnes
-A SNES emulator, in C
+# LakeSnes (3dSNES fork)
 
-## Notice
+A SNES emulator, in C — forked from [angelo-wf/LakeSnes](https://github.com/angelo-wf/LakeSnes) for use in [3dSNES](https://github.com/sp00nznet/3dsnes).
 
-I have decided to archive this repository. Some personal/mental issues mean that I don't really have the motivation to work on it further (or really, on emulation in general). There is a more active fork by [Dinkc64](https://github.com/dinkc64) over [here](https://github.com/dinkc64/LakeSnes), which already has a bunch of fixes, optimisations, as well as support for the CX4 expansion chip.
+## Fork changes
+
+This fork adds features needed by the 3dSNES project:
+
+- **SNES Mouse support** — Full 32-bit serial mouse protocol (signature, speed, buttons, relative X/Y displacement). Enables games like Mario Paint. New API: `snes_setMouseState()`, `snes_setInputDevice()`.
+- **Per-channel DSP mute** — `dsp_setChannelEnabled()` to mute/unmute individual SPC700 voices, used by the 3dSNES audio mixer UI.
+- **CMake build** — `CMakeLists.txt` for integration as a CMake subdirectory/library target.
+
+Upstream: [angelo-wf/LakeSnes](https://github.com/angelo-wf/LakeSnes) (archived). Active community fork: [dinkc64/LakeSnes](https://github.com/dinkc64/LakeSnes).
+
+---
 
 ## About
 
