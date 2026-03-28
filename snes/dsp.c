@@ -68,6 +68,7 @@ static void dsp_handleNoise(Dsp* dsp);
 
 Dsp* dsp_init(Apu* apu) {
   Dsp* dsp = malloc(sizeof(Dsp));
+  memset(dsp, 0, sizeof(Dsp));
   dsp->apu = apu;
   return dsp;
 }
@@ -343,11 +344,13 @@ static void dsp_cycleChannel(Dsp* dsp, int ch) {
   dsp->ram[(ch << 4) | 8] = dsp->channel[ch].gain >> 4;
   dsp->ram[(ch << 4) | 9] = sample >> 8;
   dsp->channel[ch].sampleOut = sample;
-  dsp->sampleOutL = clamp16(dsp->sampleOutL + ((sample * dsp->channel[ch].volumeL) >> 7));
-  dsp->sampleOutR = clamp16(dsp->sampleOutR + ((sample * dsp->channel[ch].volumeR) >> 7));
-  if(dsp->channel[ch].echoEnable) {
-    dsp->echoOutL = clamp16(dsp->echoOutL + ((sample * dsp->channel[ch].volumeL) >> 7));
-    dsp->echoOutR = clamp16(dsp->echoOutR + ((sample * dsp->channel[ch].volumeR) >> 7));
+  if(!dsp->channelMuted[ch]) {
+    dsp->sampleOutL = clamp16(dsp->sampleOutL + ((sample * dsp->channel[ch].volumeL) >> 7));
+    dsp->sampleOutR = clamp16(dsp->sampleOutR + ((sample * dsp->channel[ch].volumeR) >> 7));
+    if(dsp->channel[ch].echoEnable) {
+      dsp->echoOutL = clamp16(dsp->echoOutL + ((sample * dsp->channel[ch].volumeL) >> 7));
+      dsp->echoOutR = clamp16(dsp->echoOutR + ((sample * dsp->channel[ch].volumeR) >> 7));
+    }
   }
 }
 

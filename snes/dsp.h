@@ -83,6 +83,8 @@ struct Dsp {
   // sample ring buffer (1024 samples, *2 for stereo)
   int16_t sampleBuffer[0x400 * 2];
   uint16_t sampleOffset; // current offset in samplebuffer
+  // per-channel mute (set by host)
+  bool channelMuted[8];
 };
 
 Dsp* dsp_init(Apu* apu);

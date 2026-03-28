@@ -138,6 +138,22 @@ void snes_setButtonState(Snes* snes, int player, int button, bool pressed) {
   }
 }
 
+void snes_setMouseState(Snes* snes, int player, int16_t dx, int16_t dy, bool left, bool right) {
+  Input* input = (player == 1) ? snes->input1 : snes->input2;
+  uint8_t buttons = (left ? 1 : 0) | (right ? 2 : 0);
+  input_setMouse(input, dx, dy, buttons);
+}
+
+void snes_setInputDevice(Snes* snes, int player, int type) {
+  Input* input = (player == 1) ? snes->input1 : snes->input2;
+  input->type = (uint8_t)type;
+  // Reset mouse accumulators when switching device
+  input->mouseAccumX = 0;
+  input->mouseAccumY = 0;
+  input->mouseButtons = 0;
+  input->mouseReadBit = 0;
+}
+
 void snes_setPixelFormat(Snes* snes, int pixelFormat) {
   // pixelFormatXRGB, pixelFormatRGBX (default: pixelFormatRGBX)
   ppu_setPixelOutputFormat(snes->ppu, (pixelFormat) ? ppu_pixelOutputFormatBGRX : ppu_pixelOutputFormatXBGR);
