@@ -59,7 +59,7 @@ void snes_reset(Snes* snes, bool hard) {
   input_reset(snes->input1);
   input_reset(snes->input2);
   cart_reset(snes->cart);
-  if(snes->cart->type == 4) dsp1_reset(); // DSP-1 LoROM
+  if(snes->cart->type == 4 || snes->cart->type == 5) dsp1_reset(); // DSP-1
   if(hard) memset(snes->ram, 0, sizeof(snes->ram));
   snes->ramAdr = 0;
   snes->hPos = 0;

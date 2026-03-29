@@ -83,12 +83,17 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
   int cartType = headers[used].cartType;
   // Detect DSP-1 LoROM: coprocessor nibble = 0 with chips indicating coprocessor present
   // chips: 3 = ROM+RAM+Copro, 4 = ROM+RAM+Copro+Batt, 5 = ROM+Copro, 6 = ROM+Copro+Batt
-  if(cartType == 1 && headers[used].coprocessor == 0 &&
+  if(headers[used].coprocessor == 0 &&
      (headers[used].chips >= 3 && headers[used].chips <= 6)) {
-    printf("Detected DSP-1 LoROM cart\n");
-    cartType = 4; // DSP-1 LoROM
+    if(cartType == 1) {
+      printf("Detected DSP-1 LoROM cart\n");
+      cartType = 4; // DSP-1 LoROM
+    } else if(cartType == 2) {
+      printf("Detected DSP-1 HiROM cart\n");
+      cartType = 5; // DSP-1 HiROM
+    }
   }
-  if(cartType > 4) {
+  if(cartType > 5) {
     printf("Failed to load rom: unsupported type (%d)\n", cartType);
     return false;
   }
@@ -111,10 +116,10 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     test *= 2;
   }
   // load it
-  const char* typeNames[4] = {"(none)", "LoROM", "HiROM", "ExHiROM"};
+  const char* typeNames[6] = {"(none)", "LoROM", "HiROM", "ExHiROM", "DSP-1 LoROM", "DSP-1 HiROM"};
   printf("Loaded %s rom (%s)\n", typeNames[headers[used].cartType], headers[used].pal ? "PAL" : "NTSC");
   printf("\"%s\"\n", headers[used].name);
-  int bankSize = used >= 2 ? 0x10000 : 0x8000; // 0, 1: LoROM, else HiROM
+  int bankSize = (used >= 2 || cartType == 5) ? 0x10000 : 0x8000; // HiROM/ExHiROM/DSP-1 HiROM use 64K banks
   printf(
     "%s banks: %d, ramsize: %d\n",
     bankSize == 0x8000 ? "32K" : "64K", newLength / bankSize, headers[used].chips > 0 ? headers[used].ramSize : 0
