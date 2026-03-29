@@ -171,6 +171,7 @@ static void snes_runCycle(Snes* snes) {
       // end of vblank
       snes->inVblank = false;
       snes->inNmi = false;
+      snes->input2->scopeLatched = false; // reset Super Scope latch for new frame
       ppu_handleFrameStart(snes->ppu);
     } else if(snes->vPos == 225) {
       // ask the ppu if we start vblank now or at vPos 240 (overscan)
@@ -200,6 +201,22 @@ static void snes_runCycle(Snes* snes) {
     if(!snes->inVblank && snes->vPos > 0) ppu_runLine(snes->ppu, snes->vPos);
   } else if(snes->hPos == 1104) {
     if(!snes->inVblank) snes->dma->hdmaRunRequested = true;
+  }
+  // Super Scope beam detection: when the PPU beam reaches the aimed position,
+  // trigger a counter latch (simulates the photodiode firing).
+  // Only fires once per frame, only when $4201 bit 7 (ppuLatch) is set.
+  if(snes->input2->type == inputDeviceSuperScope &&
+     snes->ppuLatch && !snes->input2->scopeOffscreen &&
+     !snes->input2->scopeLatched && !snes->inVblank) {
+    // Visible lines are vPos 1-224, visible dots start at ~22
+    uint16_t targetV = snes->input2->scopeY + 1;
+    uint16_t targetH = (snes->input2->scopeX + 22) * 4;
+    if(snes->vPos == targetV && snes->hPos == targetH) {
+      snes->ppu->hCount = snes->hPos / 4;
+      snes->ppu->vCount = snes->vPos;
+      snes->ppu->countersLatched = true;
+      snes->input2->scopeLatched = true;
+    }
   }
   // handle autoJoyRead-timer
   if(snes->autoJoyTimer > 0) snes->autoJoyTimer -= 2;

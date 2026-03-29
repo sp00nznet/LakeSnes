@@ -87,6 +87,7 @@ enum { pixelFormatXRGB = 0, pixelFormatRGBX = 1 };
 bool snes_loadRom(Snes* snes, const uint8_t* data, int length);
 void snes_setButtonState(Snes* snes, int player, int button, bool pressed);
 void snes_setMouseState(Snes* snes, int player, int16_t dx, int16_t dy, bool left, bool right);
+void snes_setSuperScopeState(Snes* snes, uint16_t x, uint16_t y, uint8_t buttons);
 void snes_setInputDevice(Snes* snes, int player, int type);
 void snes_setPixelFormat(Snes* snes, int pixelFormat);
 void snes_setPixels(Snes* snes, uint8_t* pixelData);

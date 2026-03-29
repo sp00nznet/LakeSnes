@@ -157,6 +157,11 @@ void snes_setMouseState(Snes* snes, int player, int16_t dx, int16_t dy, bool lef
   input_setMouse(input, dx, dy, buttons);
 }
 
+void snes_setSuperScopeState(Snes* snes, uint16_t x, uint16_t y, uint8_t buttons) {
+  // Super Scope always connects to port 2
+  input_setSuperScope(snes->input2, x, y, buttons);
+}
+
 void snes_setInputDevice(Snes* snes, int player, int type) {
   Input* input = (player == 1) ? snes->input1 : snes->input2;
   input->type = (uint8_t)type;
