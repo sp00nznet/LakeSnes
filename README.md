@@ -6,6 +6,7 @@ A SNES emulator, in C — forked from [angelo-wf/LakeSnes](https://github.com/an
 
 This fork adds features needed by the 3dSNES project:
 
+- **DSP-1 coprocessor** — Full high-level emulation of the NEC uPD77C25 DSP-1/DSP-1B math coprocessor, ported from snes9x. Supports all 25+ commands (Mode 7 projection, trig, matrix transforms, 3D projection). Enables Super Mario Kart, Pilotwings, and ~15 other DSP-1 titles. Cart type 4, auto-detected from ROM header, mapped at banks `$20-3F`/`$A0-BF` `$8000-$FFFF`.
 - **SNES Mouse support** — Full 32-bit serial mouse protocol (signature, speed, buttons, relative X/Y displacement). Enables games like Mario Paint. New API: `snes_setMouseState()`, `snes_setInputDevice()`.
 - **Per-channel DSP mute** — `dsp_setChannelEnabled()` to mute/unmute individual SPC700 voices, used by the 3dSNES audio mixer UI.
 - **CMake build** — `CMakeLists.txt` for integration as a CMake subdirectory/library target.
