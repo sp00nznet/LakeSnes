@@ -8,12 +8,15 @@
 #include "cart.h"
 #include "snes.h"
 #include "statehandler.h"
+#include "dsp1.h"
 
 static uint8_t cart_readLorom(Cart* cart, uint8_t bank, uint16_t adr);
 static void cart_writeLorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val);
 static uint8_t cart_readHirom(Cart* cart, uint8_t bank, uint16_t adr);
 static uint8_t cart_readExHirom(Cart* cart, uint8_t bank, uint16_t adr);
 static void cart_writeHirom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val);
+static uint8_t cart_readDsp1Lorom(Cart* cart, uint8_t bank, uint16_t adr);
+static void cart_writeDsp1Lorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val);
 
 Cart* cart_init(Snes* snes) {
   Cart* cart = malloc(sizeof(Cart));
@@ -54,6 +57,7 @@ bool cart_handleTypeState(Cart* cart, StateHandler* sh) {
 
 void cart_handleState(Cart* cart, StateHandler* sh) {
   if(cart->ram != NULL) sh_handleByteArray(sh, cart->ram, cart->ramSize);
+  if(cart->type == 4) dsp1_handleState(sh);
 }
 
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
@@ -70,6 +74,12 @@ void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
   }
   cart->ramSize = ramSize;
   memcpy(cart->rom, rom, romSize);
+  // Initialize DSP-1 if applicable
+  if(type == 4) {
+    dsp1_init();
+    // Small LoROM (<=1MB): boundary at $C000
+    dsp1.boundary = 0xC000;
+  }
 }
 
 bool cart_handleBattery(Cart* cart, bool save, uint8_t* data, int* size) {
@@ -92,6 +102,7 @@ uint8_t cart_read(Cart* cart, uint8_t bank, uint16_t adr) {
     case 1: return cart_readLorom(cart, bank, adr);
     case 2: return cart_readHirom(cart, bank, adr);
     case 3: return cart_readExHirom(cart, bank, adr);
+    case 4: return cart_readDsp1Lorom(cart, bank, adr);
   }
   return cart->snes->openBus;
 }
@@ -102,6 +113,7 @@ void cart_write(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
     case 1: cart_writeLorom(cart, bank, adr, val); break;
     case 2: cart_writeHirom(cart, bank, adr, val); break;
     case 3: cart_writeHirom(cart, bank, adr, val); break;
+    case 4: cart_writeDsp1Lorom(cart, bank, adr, val); break;
   }
 }
 
@@ -157,5 +169,42 @@ static void cart_writeHirom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val)
   if(bank < 0x40 && adr >= 0x6000 && adr < 0x8000 && cart->ramSize > 0) {
     // banks 00-3f and 80-bf, adr 6000-7fff
     cart->ram[(((bank & 0x3f) << 13) | (adr & 0x1fff)) & (cart->ramSize - 1)] = val;
+  }
+}
+
+/*
+ * DSP-1 LoROM (small, <=1MB ROMs like Super Mario Kart).
+ * DSP-1 registers at banks $20-3F/$A0-BF, adr $8000-$FFFF.
+ * Boundary at $C000: DR below, SR at/above.
+ * Everything else is standard LoROM.
+ */
+static uint8_t cart_readDsp1Lorom(Cart* cart, uint8_t bank, uint16_t adr) {
+  uint8_t b = bank & 0x7f;
+  // DSP-1 register space: banks 20-3F, adr 8000-FFFF
+  if(b >= 0x20 && b < 0x40 && adr >= 0x8000) {
+    return dsp1_read(adr);
+  }
+  // SRAM: banks 70-7E, adr 0000-7FFF
+  if(((bank >= 0x70 && bank < 0x7e) || bank >= 0xf0) && adr < 0x8000 && cart->ramSize > 0) {
+    return cart->ram[(((bank & 0xf) << 15) | adr) & (cart->ramSize - 1)];
+  }
+  // Standard LoROM
+  b = bank & 0x7f;
+  if(adr >= 0x8000 || b >= 0x40) {
+    return cart->rom[((b << 15) | (adr & 0x7fff)) & (cart->romSize - 1)];
+  }
+  return cart->snes->openBus;
+}
+
+static void cart_writeDsp1Lorom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
+  uint8_t b = bank & 0x7f;
+  // DSP-1 register space: banks 20-3F, adr 8000-FFFF
+  if(b >= 0x20 && b < 0x40 && adr >= 0x8000) {
+    dsp1_write(adr, val);
+    return;
+  }
+  // SRAM
+  if(((bank >= 0x70 && bank < 0x7e) || bank > 0xf0) && adr < 0x8000 && cart->ramSize > 0) {
+    cart->ram[(((bank & 0xf) << 15) | adr) & (cart->ramSize - 1)] = val;
   }
 }

@@ -13,6 +13,7 @@
 #include "ppu.h"
 #include "cart.h"
 #include "input.h"
+#include "dsp1.h"
 #include "statehandler.h"
 
 static const double apuCyclesPerMaster = (32040 * 32) / (1364 * 262 * 60.0);
@@ -58,6 +59,7 @@ void snes_reset(Snes* snes, bool hard) {
   input_reset(snes->input1);
   input_reset(snes->input2);
   cart_reset(snes->cart);
+  if(snes->cart->type == 4) dsp1_reset(); // DSP-1 LoROM
   if(hard) memset(snes->ram, 0, sizeof(snes->ram));
   snes->ramAdr = 0;
   snes->hPos = 0;

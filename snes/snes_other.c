@@ -80,8 +80,16 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     length -= 0x200; // and subtract from size
   }
   // check if we can load it
-  if(headers[used].cartType > 3) {
-    printf("Failed to load rom: unsupported type (%d)\n", headers[used].cartType);
+  int cartType = headers[used].cartType;
+  // Detect DSP-1 LoROM: coprocessor nibble = 0 with chips indicating coprocessor present
+  // chips: 3 = ROM+RAM+Copro, 4 = ROM+RAM+Copro+Batt, 5 = ROM+Copro, 6 = ROM+Copro+Batt
+  if(cartType == 1 && headers[used].coprocessor == 0 &&
+     (headers[used].chips >= 3 && headers[used].chips <= 6)) {
+    printf("Detected DSP-1 LoROM cart\n");
+    cartType = 4; // DSP-1 LoROM
+  }
+  if(cartType > 4) {
+    printf("Failed to load rom: unsupported type (%d)\n", cartType);
     return false;
   }
   // expand to a power of 2
@@ -112,7 +120,7 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     bankSize == 0x8000 ? "32K" : "64K", newLength / bankSize, headers[used].chips > 0 ? headers[used].ramSize : 0
   );
   cart_load(
-    snes->cart, headers[used].cartType,
+    snes->cart, cartType,
     newData, newLength, headers[used].chips > 0 ? headers[used].ramSize : 0
   );
   snes_reset(snes, true); // reset after loading
