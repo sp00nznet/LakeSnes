@@ -10,6 +10,7 @@ This fork adds features needed by the 3dSNES project:
   - **LoROM DSP-1** (type 4) — Mapped at banks `$20-3F`/`$A0-BF` `$8000-$FFFF` (+ variant B at `$00-1F` `$6000-$7FFF`)
   - **HiROM DSP-1** (type 5) — Mapped at banks `$00-1F`/`$80-9F` `$6000-$7FFF` (DR at `$6000-$6FFF`, SR at `$7000-$7FFF`)
 - **SNES Mouse support** — Full 32-bit serial mouse protocol (signature, speed, buttons, relative X/Y displacement). Enables games like Mario Paint. New API: `snes_setMouseState()`, `snes_setInputDevice()`.
+- **Super Scope support** — Light gun emulation for controller port 2 with full 16-bit serial protocol (fire, cursor, turbo, pause, offscreen flag, noise bits). PPU H/V counter latch triggered by beam detection at the aimed pixel position during scanline rendering. Enables Super Scope 6, Yoshi's Safari, Battle Clash, Metal Combat, and other light gun titles. New API: `snes_setSuperScopeState()`, `inputDeviceSuperScope`.
 - **Per-channel DSP mute** — `dsp_setChannelEnabled()` to mute/unmute individual SPC700 voices, used by the 3dSNES audio mixer UI.
 - **CMake build** — `CMakeLists.txt` for integration as a CMake subdirectory/library target.
 
