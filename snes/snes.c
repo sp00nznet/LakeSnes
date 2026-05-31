@@ -21,7 +21,7 @@ static const double apuCyclesPerMasterPal = (32040 * 32) / (1364 * 312 * 50.0);
 
 static void snes_runCycle(Snes* snes);
 static void snes_catchupApu(Snes* snes);
-static void snes_doAutoJoypad(Snes* snes);
+void snes_doAutoJoypad(Snes* snes);
 static uint8_t snes_readReg(Snes* snes, uint16_t adr);
 static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val);
 static uint8_t snes_rread(Snes* snes, uint32_t adr); // wrapped by read, to set open bus
@@ -253,7 +253,7 @@ static void snes_catchupApu(Snes* snes) {
   snes->apuCatchupCycles -= (double) ranCycles;
 }
 
-static void snes_doAutoJoypad(Snes* snes) {
+void snes_doAutoJoypad(Snes* snes) {
   memset(snes->portAutoRead, 0, sizeof(snes->portAutoRead));
   // latch controllers
   input_latch(snes->input1, true);

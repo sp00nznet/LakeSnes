@@ -67,6 +67,7 @@ void snes_reset(Snes* snes, bool hard);
 void snes_handleState(Snes* snes, StateHandler* sh);
 void snes_runFrame(Snes* snes);
 // used by dma, cpu
+void snes_doAutoJoypad(Snes* snes);
 void snes_runCycles(Snes* snes, int cycles);
 void snes_syncCycles(Snes* snes, bool start, int syncCycles);
 uint8_t snes_readBBus(Snes* snes, uint8_t adr);
