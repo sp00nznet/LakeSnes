@@ -27,8 +27,8 @@ static const int transferLength[8] = {
 static void dma_transferByte(Dma* dma, uint16_t aAdr, uint8_t aBank, uint8_t bAdr, bool fromB);
 static void dma_waitCycle(Dma* dma);
 static void dma_doDma(Dma* dma, int cpuCycles);
-static void dma_initHdma(Dma* dma, bool doSync, int cpuCycles);
-static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles);
+static void dma_initHdma(Dma* dma, bool doSync, int cpuCycles, bool timed);
+static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles, bool timed);
 
 Dma* dma_init(Snes* snes) {
   Dma* dma = malloc(sizeof(Dma));
@@ -200,8 +200,8 @@ void dma_write(Dma* dma, uint16_t adr, uint8_t val) {
 
 static void dma_waitCycle(Dma* dma) {
   // run hdma if requested, no sync (already sycned due to dma)
-  if(dma->hdmaInitRequested) dma_initHdma(dma, false, 0);
-  if(dma->hdmaRunRequested) dma_doHdma(dma, false, 0);
+  if(dma->hdmaInitRequested) dma_initHdma(dma, false, 0, true);
+  if(dma->hdmaRunRequested) dma_doHdma(dma, false, 0, true);
   snes_runCycles(dma->snes, 8);
 }
 
@@ -235,7 +235,7 @@ static void dma_doDma(Dma* dma, int cpuCycles) {
   snes_syncCycles(dma->snes, false, cpuCycles);
 }
 
-static void dma_initHdma(Dma* dma, bool doSync, int cpuCycles) {
+static void dma_initHdma(Dma* dma, bool doSync, int cpuCycles, bool timed) {
   dma->hdmaInitRequested = false;
   bool hdmaEnabled = false;
   // check if a channel is enabled, and do reset
@@ -245,31 +245,31 @@ static void dma_initHdma(Dma* dma, bool doSync, int cpuCycles) {
     dma->channel[i].terminated = false;
   }
   if(!hdmaEnabled) return;
-  if(doSync) snes_syncCycles(dma->snes, true, 8);
+  if(doSync && timed) snes_syncCycles(dma->snes, true, 8);
   // full transfer overhead
-  snes_runCycles(dma->snes, 8);
+  if(timed) snes_runCycles(dma->snes, 8);
   for(int i = 0; i < 8; i++) {
     if(dma->channel[i].hdmaActive) {
       // terminate any dma
       dma->channel[i].dmaActive = false;
       // load address, repCount, and indirect address if needed
-      snes_runCycles(dma->snes, 8);
+      if(timed) snes_runCycles(dma->snes, 8);
       dma->channel[i].tableAdr = dma->channel[i].aAdr;
       dma->channel[i].repCount = snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr++);
       if(dma->channel[i].repCount == 0) dma->channel[i].terminated = true;
       if(dma->channel[i].indirect) {
-        snes_runCycles(dma->snes, 8);
+        if(timed) snes_runCycles(dma->snes, 8);
         dma->channel[i].size = snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr++);
-        snes_runCycles(dma->snes, 8);
+        if(timed) snes_runCycles(dma->snes, 8);
         dma->channel[i].size |= snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr++) << 8;
       }
       dma->channel[i].doTransfer = true;
     }
   }
-  if(doSync) snes_syncCycles(dma->snes, false, cpuCycles);
+  if(doSync && timed) snes_syncCycles(dma->snes, false, cpuCycles);
 }
 
-static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
+static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles, bool timed) {
   dma->hdmaRunRequested = false;
   bool hdmaActive = false;
   int lastActive = 0;
@@ -280,9 +280,9 @@ static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
     }
   }
   if(!hdmaActive) return;
-  if(doSync) snes_syncCycles(dma->snes, true, 8);
+  if(doSync && timed) snes_syncCycles(dma->snes, true, 8);
   // full transfer overhead
-  snes_runCycles(dma->snes, 8);
+  if(timed) snes_runCycles(dma->snes, 8);
   // do all copies
   for(int i = 0; i < 8; i++) {
     // terminate any dma
@@ -291,7 +291,7 @@ static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
       // do the hdma
       if(dma->channel[i].doTransfer) {
         for(int j = 0; j < transferLength[dma->channel[i].mode]; j++) {
-          snes_runCycles(dma->snes, 8);
+          if(timed) snes_runCycles(dma->snes, 8);
           if(dma->channel[i].indirect) {
             dma_transferByte(
               dma, dma->channel[i].size++, dma->channel[i].indBank,
@@ -312,7 +312,7 @@ static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
     if(dma->channel[i].hdmaActive && !dma->channel[i].terminated) {
       dma->channel[i].repCount--;
       dma->channel[i].doTransfer = dma->channel[i].repCount & 0x80;
-      snes_runCycles(dma->snes, 8);
+      if(timed) snes_runCycles(dma->snes, 8);
       uint8_t newRepCount = snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr);
       if((dma->channel[i].repCount & 0x7f) == 0) {
         dma->channel[i].repCount = newRepCount;
@@ -322,10 +322,10 @@ static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
             // if this is the last active channel, only fetch high, and use 0 for low
             dma->channel[i].size = 0;
           } else {
-            snes_runCycles(dma->snes, 8);
+            if(timed) snes_runCycles(dma->snes, 8);
             dma->channel[i].size = snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr++);
           }
-          snes_runCycles(dma->snes, 8);
+          if(timed) snes_runCycles(dma->snes, 8);
           dma->channel[i].size |= snes_read(dma->snes, (dma->channel[i].aBank << 16) | dma->channel[i].tableAdr++) << 8;
         }
         if(dma->channel[i].repCount == 0) dma->channel[i].terminated = true;
@@ -333,7 +333,23 @@ static void dma_doHdma(Dma* dma, bool doSync, int cpuCycles) {
       }
     }
   }
-  if(doSync) snes_syncCycles(dma->snes, false, cpuCycles);
+  if(doSync && timed) snes_syncCycles(dma->snes, false, cpuCycles);
+}
+
+/* Untimed HDMA entry points for frame drivers that render scanlines manually
+ * (e.g. snesrecomp) and never step the per-cycle CPU loop. They perform the
+ * HDMA register writes without advancing SNES master cycles, so they don't
+ * render lines or fire NMI as a side effect. Call dma_hdmaInitFrame() once at
+ * frame start (after vblank), then dma_hdmaRunLine() before rendering each
+ * visible scanline. */
+void dma_hdmaInitFrame(Dma* dma) {
+  dma->hdmaInitRequested = false;
+  dma_initHdma(dma, false, 0, false);
+}
+
+void dma_hdmaRunLine(Dma* dma) {
+  dma->hdmaRunRequested = false;
+  dma_doHdma(dma, false, 0, false);
 }
 
 static void dma_transferByte(Dma* dma, uint16_t aAdr, uint8_t aBank, uint8_t bAdr, bool fromB) {
@@ -357,8 +373,8 @@ static void dma_transferByte(Dma* dma, uint16_t aAdr, uint8_t aBank, uint8_t bAd
 void dma_handleDma(Dma* dma, int cpuCycles) {
   // if hdma triggered, do it, except if dmastate indicates dma will be done now
   // (it will be done as part of the dma in that case)
-  if(dma->hdmaInitRequested && dma->dmaState != 2) dma_initHdma(dma, true, cpuCycles);
-  if(dma->hdmaRunRequested && dma->dmaState != 2) dma_doHdma(dma, true, cpuCycles);
+  if(dma->hdmaInitRequested && dma->dmaState != 2) dma_initHdma(dma, true, cpuCycles, true);
+  if(dma->hdmaRunRequested && dma->dmaState != 2) dma_doHdma(dma, true, cpuCycles, true);
   if(dma->dmaState == 1) {
     dma->dmaState = 2;
     return;
