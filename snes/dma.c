@@ -212,6 +212,15 @@ static void dma_doDma(Dma* dma, int cpuCycles) {
   dma_waitCycle(dma);
   for(int i = 0; i < 8; i++) {
     if(!dma->channel[i].dmaActive) continue;
+    // SMK_DMA_LOG: trace CGRAM-targeting GPDMA (shared by native + recomp
+    // builds) to compare the two engines' palette-upload sequences. Logs the
+    // CGADD (cgramPointer) at transfer start so CGADD-wrap bugs are visible.
+    if(dma->channel[i].bAdr == 0x22 && getenv("SMK_DMA_LOG")) {
+      fprintf(stderr, "[CGDMA] ch%d src=%02X:%04X size=%04X mode=%d CGADD=%02X\n",
+              i, dma->channel[i].aBank, dma->channel[i].aAdr,
+              dma->channel[i].size, dma->channel[i].mode,
+              dma->snes->ppu->cgramPointer);
+    }
     // do channel i
     dma_waitCycle(dma); // overhead per channel
     int offIndex = 0;
