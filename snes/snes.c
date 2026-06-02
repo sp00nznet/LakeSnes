@@ -490,6 +490,19 @@ void snes_write(Snes* snes, uint32_t adr, uint8_t val) {
   snes->openBus = val;
   uint8_t bank = adr >> 16;
   adr &= 0xffff;
+  // SMK_WATCH_WRAM: log writes (with CPU PC) to a chosen WRAM offset in BOTH
+  // builds, e.g. SMK_WATCH_WRAM=36 to find what changes the game-state var $36.
+  {
+    static long s_ww = -2;
+    if (s_ww == -2) { const char *e = getenv("SMK_WATCH_WRAM"); s_ww = e ? strtol(e, NULL, 16) : -1; }
+    if (s_ww >= 0) {
+      uint32_t off = (bank == 0x7e || bank == 0x7f) ? (((bank & 1) << 16) | adr)
+                   : ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && adr < 0x2000) ? adr : 0xFFFFFFFF;
+      if (off == (uint32_t)s_ww && snes->cpu)
+        fprintf(stderr, "WRAM $%05lX <- %02X  pc=%02X:%04X\n",
+                s_ww, val, snes->cpu->k, snes->cpu->pc);
+    }
+  }
   if(bank == 0x7e || bank == 0x7f) {
     snes->ram[((bank & 1) << 16) | adr] = val; // ram
   }
