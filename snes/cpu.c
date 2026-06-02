@@ -119,6 +119,19 @@ void cpu_runOpcode(Cpu* cpu) {
     cpu_read(cpu, (cpu->k << 16) | cpu->pc);
     cpu_doInterrupt(cpu);
   } else {
+    // SMK_PC_TRACE="aaaaaa,bbbbbb,..." — log execution at up to 8 24-bit PCs
+    // (both builds), with A/X to inspect control flow / input branches.
+    {
+      static int s_n = -1; static uint32_t s_pc[8];
+      if (s_n == -1) {
+        s_n = 0; const char *e = getenv("SMK_PC_TRACE");
+        if (e) { char b[128]; size_t i=0; while(e[i]&&i<127){b[i]=e[i];i++;} b[i]=0;
+          char *t = strtok(b, ","); while (t && s_n < 8) { s_pc[s_n++] = strtoul(t,0,16); t = strtok(0,","); } }
+      }
+      if (s_n) { uint32_t fp = (cpu->k << 16) | cpu->pc;
+        for (int i=0;i<s_n;i++) if (fp==s_pc[i]) {
+          fprintf(stderr, "PCT %06X a=%04X x=%04X\n", fp, cpu->a, cpu->x); break; } }
+    }
     uint8_t opcode = cpu_readOpcode(cpu);
     cpu_doOpcode(cpu, opcode);
   }
