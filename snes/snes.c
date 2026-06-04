@@ -60,7 +60,12 @@ void snes_reset(Snes* snes, bool hard) {
   input_reset(snes->input2);
   cart_reset(snes->cart);
   if(snes->cart->type == 4 || snes->cart->type == 5) dsp1_reset(); // DSP-1
-  if(hard) memset(snes->ram, 0, sizeof(snes->ram));
+  // Power-on WRAM is NOT zero on real hardware; SMK reads uninitialized $2E as the
+  // game-mode and clamps garbage -> 2 (1-player, 2P auto-done). A zero fill makes
+  // $2E=0 (2-player), which hangs the driver-select waiting for player 2. snes9x
+  // fills WRAM with 0x55 ($2E=$5555 -> 2); match it so uninitialized reads behave
+  // like the reference emulator / hardware. See docs/smk_flow_re.md.
+  if(hard) memset(snes->ram, 0x55, sizeof(snes->ram));
   snes->ramAdr = 0;
   snes->hPos = 0;
   snes->vPos = 0;

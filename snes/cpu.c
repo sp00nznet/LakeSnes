@@ -8,6 +8,10 @@
 #include "cpu.h"
 #include "statehandler.h"
 
+// SMK range-trace controls (set per-frame by the harness, e.g. tools/lakesnes_ref).
+int g_cpuTraceOn = 0;
+uint32_t g_cpuTraceLo = 0, g_cpuTraceHi = 0;
+
 static uint8_t cpu_read(Cpu* cpu, uint32_t adr);
 static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val);
 static void cpu_idle(Cpu* cpu);
@@ -131,6 +135,16 @@ void cpu_runOpcode(Cpu* cpu) {
       if (s_n) { uint32_t fp = (cpu->k << 16) | cpu->pc;
         for (int i=0;i<s_n;i++) if (fp==s_pc[i]) {
           fprintf(stderr, "PCT %06X a=%04X x=%04X\n", fp, cpu->a, cpu->x); break; } }
+    }
+    // SMK range trace: when g_cpuTraceOn (set per-frame by the harness), log every
+    // instruction whose 24-bit PC is in [g_cpuTraceLo,g_cpuTraceHi] with A/X/P/DP.
+    if (g_cpuTraceOn) { uint32_t fp = (cpu->k << 16) | cpu->pc;
+      if (fp >= g_cpuTraceLo && fp <= g_cpuTraceHi) {
+        uint8_t op = cpu->read(cpu->mem, fp);
+        uint8_t p = (cpu->c<<0)|(cpu->z<<1)|(cpu->i<<2)|(cpu->d<<3)|(cpu->xf<<4)|(cpu->mf<<5)|(cpu->v<<6)|(cpu->n<<7);
+        fprintf(stderr, "T %06X op=%02X a=%04X x=%04X y=%04X p=%02X dp=%04X\n",
+                fp, op, cpu->a, cpu->x, cpu->y, p, cpu->dp);
+      }
     }
     uint8_t opcode = cpu_readOpcode(cpu);
     cpu_doOpcode(cpu, opcode);
