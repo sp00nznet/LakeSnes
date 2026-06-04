@@ -12,6 +12,14 @@
 int g_cpuTraceOn = 0;
 uint32_t g_cpuTraceLo = 0, g_cpuTraceHi = 0;
 
+// Recomp interception hook (Phase-1 timed-recomp model). When non-NULL, called
+// at each opcode-fetch in the timed CPU loop with the live Cpu*; if it returns
+// true it has executed a registered recompiled function in place of the ROM
+// subroutine at PB:PC (and advanced PB:PC past it via a simulated RTS/RTL), so
+// the normal opcode fetch/execute is skipped. NULL (the default, and in the
+// pure-emulation lakesnes_ref) means zero overhead. Set by snesrecomp.
+bool (*g_cpuRecompHook)(Cpu*) = NULL;
+
 static uint8_t cpu_read(Cpu* cpu, uint32_t adr);
 static void cpu_write(Cpu* cpu, uint32_t adr, uint8_t val);
 static void cpu_idle(Cpu* cpu);
@@ -123,6 +131,9 @@ void cpu_runOpcode(Cpu* cpu) {
     cpu_read(cpu, (cpu->k << 16) | cpu->pc);
     cpu_doInterrupt(cpu);
   } else {
+    // Timed-recomp interception: if a registered recompiled function lives at
+    // PB:PC, run its native C body instead of the ROM and skip this opcode.
+    if (g_cpuRecompHook && g_cpuRecompHook(cpu)) return;
     // SMK_PC_TRACE="aaaaaa,bbbbbb,..." — log execution at up to 8 24-bit PCs
     // (both builds), with A/X to inspect control flow / input branches.
     {
