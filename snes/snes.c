@@ -13,6 +13,7 @@
 #include "ppu.h"
 #include "cart.h"
 #include "input.h"
+#include "dsp1.h"
 #include "statehandler.h"
 
 static const double apuCyclesPerMaster = (32040 * 32) / (1364 * 262 * 60.0);
@@ -20,7 +21,7 @@ static const double apuCyclesPerMasterPal = (32040 * 32) / (1364 * 312 * 50.0);
 
 static void snes_runCycle(Snes* snes);
 static void snes_catchupApu(Snes* snes);
-static void snes_doAutoJoypad(Snes* snes);
+void snes_doAutoJoypad(Snes* snes);
 static uint8_t snes_readReg(Snes* snes, uint16_t adr);
 static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val);
 static uint8_t snes_rread(Snes* snes, uint32_t adr); // wrapped by read, to set open bus
@@ -58,7 +59,13 @@ void snes_reset(Snes* snes, bool hard) {
   input_reset(snes->input1);
   input_reset(snes->input2);
   cart_reset(snes->cart);
-  if(hard) memset(snes->ram, 0, sizeof(snes->ram));
+  if(snes->cart->type == 4 || snes->cart->type == 5) dsp1_reset(); // DSP-1
+  // Power-on WRAM is NOT zero on real hardware; SMK reads uninitialized $2E as the
+  // game-mode and clamps garbage -> 2 (1-player, 2P auto-done). A zero fill makes
+  // $2E=0 (2-player), which hangs the driver-select waiting for player 2. snes9x
+  // fills WRAM with 0x55 ($2E=$5555 -> 2); match it so uninitialized reads behave
+  // like the reference emulator / hardware. See docs/smk_flow_re.md.
+  if(hard) memset(snes->ram, 0x55, sizeof(snes->ram));
   snes->ramAdr = 0;
   snes->hPos = 0;
   snes->vPos = 0;
@@ -169,6 +176,7 @@ static void snes_runCycle(Snes* snes) {
       // end of vblank
       snes->inVblank = false;
       snes->inNmi = false;
+      snes->input2->scopeLatched = false; // reset Super Scope latch for new frame
       ppu_handleFrameStart(snes->ppu);
     } else if(snes->vPos == 225) {
       // ask the ppu if we start vblank now or at vPos 240 (overscan)
@@ -198,6 +206,22 @@ static void snes_runCycle(Snes* snes) {
     if(!snes->inVblank && snes->vPos > 0) ppu_runLine(snes->ppu, snes->vPos);
   } else if(snes->hPos == 1104) {
     if(!snes->inVblank) snes->dma->hdmaRunRequested = true;
+  }
+  // Super Scope beam detection: when the PPU beam reaches the aimed position,
+  // trigger a counter latch (simulates the photodiode firing).
+  // Only fires once per frame, only when $4201 bit 7 (ppuLatch) is set.
+  if(snes->input2->type == inputDeviceSuperScope &&
+     snes->ppuLatch && !snes->input2->scopeOffscreen &&
+     !snes->input2->scopeLatched && !snes->inVblank) {
+    // Visible lines are vPos 1-224, visible dots start at ~22
+    uint16_t targetV = snes->input2->scopeY + 1;
+    uint16_t targetH = (snes->input2->scopeX + 22) * 4;
+    if(snes->vPos == targetV && snes->hPos == targetH) {
+      snes->ppu->hCount = snes->hPos / 4;
+      snes->ppu->vCount = snes->vPos;
+      snes->ppu->countersLatched = true;
+      snes->input2->scopeLatched = true;
+    }
   }
   // handle autoJoyRead-timer
   if(snes->autoJoyTimer > 0) snes->autoJoyTimer -= 2;
@@ -234,7 +258,7 @@ static void snes_catchupApu(Snes* snes) {
   snes->apuCatchupCycles -= (double) ranCycles;
 }
 
-static void snes_doAutoJoypad(Snes* snes) {
+void snes_doAutoJoypad(Snes* snes) {
   memset(snes->portAutoRead, 0, sizeof(snes->portAutoRead));
   // latch controllers
   input_latch(snes->input1, true);
@@ -471,6 +495,19 @@ void snes_write(Snes* snes, uint32_t adr, uint8_t val) {
   snes->openBus = val;
   uint8_t bank = adr >> 16;
   adr &= 0xffff;
+  // SMK_WATCH_WRAM: log writes (with CPU PC) to a chosen WRAM offset in BOTH
+  // builds, e.g. SMK_WATCH_WRAM=36 to find what changes the game-state var $36.
+  {
+    static long s_ww = -2;
+    if (s_ww == -2) { const char *e = getenv("SMK_WATCH_WRAM"); s_ww = e ? strtol(e, NULL, 16) : -1; }
+    if (s_ww >= 0) {
+      uint32_t off = (bank == 0x7e || bank == 0x7f) ? (((bank & 1) << 16) | adr)
+                   : ((bank < 0x40 || (bank >= 0x80 && bank < 0xc0)) && adr < 0x2000) ? adr : 0xFFFFFFFF;
+      if (off == (uint32_t)s_ww && snes->cpu)
+        fprintf(stderr, "WRAM $%05lX <- %02X  pc=%02X:%04X\n",
+                s_ww, val, snes->cpu->k, snes->cpu->pc);
+    }
+  }
   if(bank == 0x7e || bank == 0x7f) {
     snes->ram[((bank & 1) << 16) | adr] = val; // ram
   }

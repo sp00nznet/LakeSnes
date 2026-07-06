@@ -80,8 +80,21 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     length -= 0x200; // and subtract from size
   }
   // check if we can load it
-  if(headers[used].cartType > 4) {
-    printf("Failed to load rom: unsupported type (%d)\n", headers[used].cartType);
+  int cartType = headers[used].cartType; // 1/2/3 base, 6 = LoROM+SuperFX (set by readHeader)
+  // Detect DSP-1 LoROM: coprocessor nibble = 0 with chips indicating coprocessor present
+  // chips: 3 = ROM+RAM+Copro, 4 = ROM+RAM+Copro+Batt, 5 = ROM+Copro, 6 = ROM+Copro+Batt
+  if(headers[used].coprocessor == 0 &&
+     (headers[used].chips >= 3 && headers[used].chips <= 6)) {
+    if(cartType == 1) {
+      printf("Detected DSP-1 LoROM cart\n");
+      cartType = 4; // DSP-1 LoROM
+    } else if(cartType == 2) {
+      printf("Detected DSP-1 HiROM cart\n");
+      cartType = 5; // DSP-1 HiROM
+    }
+  }
+  if(cartType > 6) {
+    printf("Failed to load rom: unsupported type (%d)\n", cartType);
     return false;
   }
   // expand to a power of 2
@@ -103,20 +116,21 @@ bool snes_loadRom(Snes* snes, const uint8_t* data, int length) {
     test *= 2;
   }
   // load it
-  const char* typeNames[5] = {"(none)", "LoROM", "HiROM", "ExHiROM", "LoROM+SuperFX"};
-  printf("Loaded %s rom (%s)\n", typeNames[headers[used].cartType], headers[used].pal ? "PAL" : "NTSC");
+  const char* typeNames[7] = {"(none)", "LoROM", "HiROM", "ExHiROM", "DSP-1 LoROM", "DSP-1 HiROM", "LoROM+SuperFX"};
+  printf("Loaded %s rom (%s)\n", typeNames[cartType], headers[used].pal ? "PAL" : "NTSC");
   printf("\"%s\"\n", headers[used].name);
-  int bankSize = (used >= 2 && used <= 3) ? 0x10000 : 0x8000; // 0, 1, 4+: LoROM, else HiROM
+  // HiROM/ExHiROM/DSP-1 HiROM use 64K banks; LoROM/SuperFX/DSP-1 LoROM use 32K
+  int bankSize = (used >= 2 || cartType == 5) ? 0x10000 : 0x8000;
   printf(
     "%s banks: %d, ramsize: %d\n",
     bankSize == 0x8000 ? "32K" : "64K", newLength / bankSize, headers[used].chips > 0 ? headers[used].ramSize : 0
   );
   cart_load(
-    snes->cart, headers[used].cartType,
+    snes->cart, cartType,
     newData, newLength, headers[used].chips > 0 ? headers[used].ramSize : 0
   );
   // Initialize Super FX / GSU if this is a Super FX cartridge
-  if(headers[used].cartType == 4) {
+  if(cartType == 6) {
     if(snes->cart->gsu != NULL) gsu_free(snes->cart->gsu);
     snes->cart->gsu = gsu_init(snes);
     // Super FX games have 64KB or 128KB of GSU work RAM
@@ -151,6 +165,27 @@ void snes_setButtonState(Snes* snes, int player, int button, bool pressed) {
       snes->input2->currentState &= ~(1 << button);
     }
   }
+}
+
+void snes_setMouseState(Snes* snes, int player, int16_t dx, int16_t dy, bool left, bool right) {
+  Input* input = (player == 1) ? snes->input1 : snes->input2;
+  uint8_t buttons = (left ? 1 : 0) | (right ? 2 : 0);
+  input_setMouse(input, dx, dy, buttons);
+}
+
+void snes_setSuperScopeState(Snes* snes, uint16_t x, uint16_t y, uint8_t buttons) {
+  // Super Scope always connects to port 2
+  input_setSuperScope(snes->input2, x, y, buttons);
+}
+
+void snes_setInputDevice(Snes* snes, int player, int type) {
+  Input* input = (player == 1) ? snes->input1 : snes->input2;
+  input->type = (uint8_t)type;
+  // Reset mouse accumulators when switching device
+  input->mouseAccumX = 0;
+  input->mouseAccumY = 0;
+  input->mouseButtons = 0;
+  input->mouseReadBit = 0;
 }
 
 void snes_setPixelFormat(Snes* snes, int pixelFormat) {
@@ -273,7 +308,7 @@ static void readHeader(const uint8_t* data, int length, int location, CartHeader
   // Detect Super FX: coprocessor type 1 in $FFD6 high nibble, or chips field indicates GSU
   // $FFD6: high nibble = coprocessor (1=GSU), low nibble = chips (3=copro+RAM+battery, A=copro+RAM)
   if(header->coprocessor == 1 && header->cartType == 1) {
-    header->cartType = 4; // LoROM + Super FX
+    header->cartType = 6; // LoROM + Super FX (4/5 reserved for DSP-1)
   }
   // get score
   // TODO: check name, maker/game-codes (if V3) for ASCII, more vectors,

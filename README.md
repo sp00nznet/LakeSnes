@@ -1,9 +1,22 @@
-# LakeSnes
-A SNES emulator, in C
+# LakeSnes (3dSNES fork)
 
-## Notice
+A SNES emulator, in C — forked from [angelo-wf/LakeSnes](https://github.com/angelo-wf/LakeSnes) for use in [3dSNES](https://github.com/sp00nznet/3dsnes).
 
-I have decided to archive this repository. Some personal/mental issues mean that I don't really have the motivation to work on it further (or really, on emulation in general). There is a more active fork by [Dinkc64](https://github.com/dinkc64) over [here](https://github.com/dinkc64/LakeSnes), which already has a bunch of fixes, optimisations, as well as support for the CX4 expansion chip.
+## Fork changes
+
+This fork adds features needed by the 3dSNES project:
+
+- **DSP-1 coprocessor** — Full high-level emulation of the NEC uPD77C25 DSP-1/DSP-1B math coprocessor, ported from snes9x. Supports all 25+ commands (Mode 7 projection, trig, matrix transforms, 3D projection). Enables Super Mario Kart, Pilotwings, and ~15 other DSP-1 titles. Two mapping variants auto-detected from ROM header:
+  - **LoROM DSP-1** (type 4) — Mapped at banks `$20-3F`/`$A0-BF` `$8000-$FFFF` (+ variant B at `$00-1F` `$6000-$7FFF`)
+  - **HiROM DSP-1** (type 5) — Mapped at banks `$00-1F`/`$80-9F` `$6000-$7FFF` (DR at `$6000-$6FFF`, SR at `$7000-$7FFF`)
+- **SNES Mouse support** — Full 32-bit serial mouse protocol (signature, speed, buttons, relative X/Y displacement). Enables games like Mario Paint. New API: `snes_setMouseState()`, `snes_setInputDevice()`.
+- **Super Scope support** — Light gun emulation for controller port 2 with full 16-bit serial protocol (fire, cursor, turbo, pause, offscreen flag, noise bits). PPU H/V counter latch triggered by beam detection at the aimed pixel position during scanline rendering. Enables Super Scope 6, Yoshi's Safari, Battle Clash, Metal Combat, and other light gun titles. New API: `snes_setSuperScopeState()`, `inputDeviceSuperScope`.
+- **Per-channel DSP mute** — `dsp_setChannelEnabled()` to mute/unmute individual SPC700 voices, used by the 3dSNES audio mixer UI.
+- **CMake build** — `CMakeLists.txt` for integration as a CMake subdirectory/library target.
+
+Upstream: [angelo-wf/LakeSnes](https://github.com/angelo-wf/LakeSnes) (archived). Active community fork: [dinkc64/LakeSnes](https://github.com/dinkc64/LakeSnes).
+
+---
 
 ## About
 
@@ -114,7 +127,7 @@ Minimizing or hiding the window can cause high CPU usage as this can cause v-syn
 
 ## Compatibility
 
-The emulator currently only supports regular LoROM, HiROM and ExHiROM games (no co-processors and such).
+The emulator supports regular LoROM, HiROM and ExHiROM games, plus DSP-1 coprocessor games (both LoROM and HiROM variants). Other co-processors are not yet supported.
 SPC files can not be loaded yet, but are planned.
 
 This emulator is definitely not fully accurate. The PPU renders per scanline, so mid-scanline effects are not supported. The DSP executes on a per-sample basis. The SPC and CPU-side timing should be cycle-accurate now, but the exact timing of certain event is still somewhat off. Communication between the CPU and SPC is also not cycle-accurate.
