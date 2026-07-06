@@ -194,15 +194,17 @@ static uint8_t cart_readSuperFX(Cart* cart, uint8_t bank, uint16_t adr) {
     return gsu_cache_read(cart->gsu, adr);
   }
 
-  // Backup RAM (SRAM): $70-$71 : $0000-$FFFF (also $78-$79 on some carts)
-  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
-    return cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)];
-  }
-
-  // GSU work RAM: $60-$6F : $0000-$FFFF (when GSU is not running)
-  if(mbank >= 0x60 && mbank < 0x70 && cart->gsu && cart->gsu->ram) {
+  // GSU work RAM: $60-$71 : $0000-$FFFF (when GSU is not running)
+  // Banks $70-$71 also map to GSU work RAM on SuperFX carts
+  // (they share the same physical cartridge RAM)
+  if(mbank >= 0x60 && mbank < 0x72 && cart->gsu && cart->gsu->ram) {
     uint32_t offset = ((uint32_t)(mbank & 0x0F) << 16) | adr;
     return cart->gsu->ram[offset & (cart->gsu->ram_size - 1)];
+  }
+
+  // Fallback: Backup RAM (SRAM) at $70-$71 if no GSU
+  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
+    return cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)];
   }
 
   // ROM: $00-$3F/$80-$BF : $8000-$FFFF (LoROM mapping)
@@ -238,16 +240,16 @@ static void cart_writeSuperFX(Cart* cart, uint8_t bank, uint16_t adr, uint8_t va
     return;
   }
 
-  // Backup RAM (SRAM): $70-$71 : $0000-$FFFF
-  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
-    cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)] = val;
+  // GSU work RAM: $60-$71 : $0000-$FFFF
+  if(mbank >= 0x60 && mbank < 0x72 && cart->gsu && cart->gsu->ram) {
+    uint32_t offset = ((uint32_t)(mbank & 0x0F) << 16) | adr;
+    cart->gsu->ram[offset & (cart->gsu->ram_size - 1)] = val;
     return;
   }
 
-  // GSU work RAM: $60-$6F : $0000-$FFFF
-  if(mbank >= 0x60 && mbank < 0x70 && cart->gsu && cart->gsu->ram) {
-    uint32_t offset = ((uint32_t)(mbank & 0x0F) << 16) | adr;
-    cart->gsu->ram[offset & (cart->gsu->ram_size - 1)] = val;
+  // Fallback: Backup RAM (SRAM) at $70-$71 if no GSU
+  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
+    cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)] = val;
     return;
   }
 

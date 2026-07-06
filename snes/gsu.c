@@ -70,9 +70,22 @@ static void gsu_update_nz(Gsu *gsu, uint16_t val) {
 
 /* ── memory access from GSU side ──────────────────────────── */
 
+/*
+ * Convert a GSU ROM address (bank << 16 | offset) to a file offset.
+ * SuperFX LoROM carts use 32KB banks, so the mapping is:
+ *   file_offset = bank * 0x8000 + (addr & 0x7FFF)
+ */
+static uint32_t gsu_rom_map(uint32_t addr) {
+    uint8_t bank = (uint8_t)(addr >> 16);
+    uint16_t offset = (uint16_t)(addr & 0xFFFF);
+    /* LoROM SuperFX: 32KB banks */
+    return (uint32_t)bank * 0x8000 + (offset & 0x7FFF);
+}
+
 static uint8_t gsu_rom_read(Gsu *gsu, uint32_t addr) {
     if (!gsu->rom) return 0;
-    return gsu->rom[addr & (gsu->rom_size - 1)];
+    uint32_t mapped = gsu_rom_map(addr);
+    return gsu->rom[mapped & (gsu->rom_size - 1)];
 }
 
 static uint8_t gsu_ram_read(Gsu *gsu, uint16_t addr) {
@@ -1015,7 +1028,18 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
         break;
 
     case 0x3C: gsu_op_loop(gsu); break;
-    case 0x3D:
+    case 0x3D: gsu_op_alt1(gsu); return; /* ALT1 prefix — don't reset flags */
+    case 0x3E: gsu_op_alt2(gsu); return; /* ALT2 prefix — don't reset flags */
+    case 0x3F: gsu_op_alt3(gsu); return; /* ALT3 prefix — don't reset flags */
+
+    /* NOTE: The old code had GETB/SBK/ROMB at $3D/$3E/$3F which was wrong.
+     * Per the GSU spec (fullsnes, ares), $3D/$3E/$3F are ALT prefix opcodes.
+     * GETB/GETBH/GETBL/GETBS are ALT-mode variants of $EF (GETC).
+     * SBK is dispatched from the $90-$9F range.
+     * ROMB/RAMB are dispatched from specific ALT modes of other opcodes. */
+
+#if 0 /* Old incorrect dispatch — preserved for reference */
+    case 0x3D_old:
         if (gsu->flag_alt1) {
             gsu_op_getbh(gsu);
         } else if (gsu->flag_alt2) {
@@ -1026,19 +1050,17 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
             gsu_op_getb(gsu);
         }
         break;
-    case 0x3E: gsu_op_sbk(gsu); break;
-    case 0x3F:
-        /* ROMB / RAMB / SBK variants — but actually this is just documented wrong */
-        /* $3F = undocumented in some references. Actually this is a prefix check. */
-        /* In practice: alt2=RAMB, alt1=ROMB */
+    case 0x3E_old: gsu_op_sbk(gsu); break;
+    case 0x3F_old:
         if (gsu->flag_alt1) {
             gsu_op_romb(gsu);
         } else if (gsu->flag_alt2) {
             gsu_op_ramb(gsu);
         } else {
-            gsu_op_nop(gsu); /* undocumented */
+            gsu_op_nop(gsu);
         }
         break;
+#endif /* Old incorrect dispatch */
 
     /* $40-$4B: LDW (Rn) / LDB (Rn) */
     case 0x40: case 0x41: case 0x42: case 0x43:
@@ -1089,27 +1111,55 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
         gsu_op_mult(gsu, op & 0x0F);
         break;
 
-    /* $90-$9F: SBK / LINK / SEX / ASR / LSR / ROL / ROR / ... */
-    case 0x90: case 0x91: case 0x92: case 0x93:
-    case 0x94: case 0x95: case 0x96: case 0x97:
+    /* $90-$9F: SBK, LINK, SEX, ASR, ROR, JMP, LOB, FMULT
+     * Corrected from ares/fullsnes reference. These are individual
+     * opcodes, not a register-indexed block. */
+    case 0x90: gsu_op_sbk(gsu); break;                     /* SBK — store back */
+    case 0x91: case 0x92: case 0x93: case 0x94:
+        gsu_op_link(gsu, op & 0x0F); break;                /* LINK #1-4 */
+    case 0x95: gsu_op_sex(gsu); break;                      /* SEX — sign extend */
+    case 0x96:
+        if (gsu->flag_alt1) {
+            /* DIV2 — divide by 2 (signed) */
+            int16_t val = (int16_t)SREG;
+            DREG = (uint16_t)((val >> 1) + ((val + 1) >> 16));
+            gsu_update_nz(gsu, DREG);
+        } else {
+            gsu_op_asr(gsu);                                /* ASR — arithmetic shift right */
+        }
+        gsu_step(gsu, 1);
+        break;
+    case 0x97:                                              /* ROR — rotate right through carry */
+        {
+            uint16_t carry_in = gsu->flag_cy ? 0x8000 : 0;
+            gsu->flag_cy = SREG & 1;
+            DREG = (SREG >> 1) | carry_in;
+            gsu_update_nz(gsu, DREG);
+            gsu_step(gsu, 1);
+        }
+        break;
     case 0x98: case 0x99: case 0x9A: case 0x9B:
-    case 0x9C: case 0x9D: case 0x9E:
-        gsu_op_ibt(gsu, op & 0x0F);
+    case 0x9C: case 0x9D:
+        gsu_op_jmp(gsu, op & 0x0F); break;                 /* JMP R8-R13 / LJMP(ALT1) */
+    case 0x9E:
+        DREG = SREG & 0x00FF;                              /* LOB — low byte */
+        gsu_update_nz(gsu, DREG);
+        gsu_step(gsu, 1);
         break;
-    case 0x9F:
-        /* FMULT / LMULT */
-        gsu_op_fmult(gsu);
-        break;
+    case 0x9F: gsu_op_fmult(gsu); break;                   /* FMULT / LMULT(ALT1) */
 
-    /* $A0-$AF: IWT Rn / LM / SM / LMS / SMS */
+    /* $A0-$AF: IBT Rn, #pp — Immediate Byte Transfer (2-byte instruction)
+     * ALT1: LMS Rn, (yy) — load from short address (yy*2)
+     * ALT2: SMS (yy), Rn — store to short address (yy*2)
+     * NOTE: Was incorrectly mapped as IWT (3-byte) which consumed an extra byte! */
     case 0xA0: case 0xA1: case 0xA2: case 0xA3:
     case 0xA4: case 0xA5: case 0xA6: case 0xA7:
     case 0xA8: case 0xA9: case 0xAA: case 0xAB:
     case 0xAC: case 0xAD: case 0xAE: case 0xAF:
-        gsu_op_iwt(gsu, op & 0x0F);
+        gsu_op_ibt(gsu, op & 0x0F);
         break;
 
-    /* $B0-$BF: OR / XOR */
+    /* $B0-$BF: OR Rn / XOR Rn (with ALT modes) */
     case 0xB0: case 0xB1: case 0xB2: case 0xB3:
     case 0xB4: case 0xB5: case 0xB6: case 0xB7:
     case 0xB8: case 0xB9: case 0xBA: case 0xBB:
@@ -1117,7 +1167,8 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
         gsu_op_or(gsu, op & 0x0F);
         break;
 
-    /* $C0-$CF: INC Rn / DEC Rn / HIB / LOB */
+    /* $C0-$CF: HIB / INC Rn / DEC Rn / LOB
+     * C0=HIB, C1-CE=INC(normal)/DEC(ALT1), CF=FMULT or LOB */
     case 0xC0: gsu_op_hib(gsu); break;
     case 0xC1: case 0xC2: case 0xC3:
     case 0xC4: case 0xC5: case 0xC6: case 0xC7:
@@ -1129,20 +1180,42 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
             gsu_op_inc(gsu, op & 0x0F);
         }
         break;
-    case 0xCF: gsu_op_lob(gsu); break;
+    case 0xCF:
+        /* GETC — get color from ROM buffer (same as $DF without ALT) */
+        gsu_op_lob(gsu);
+        break;
 
-    /* $D0-$DF: GETC / JMP / LJMP (various meanings) */
+    /* $D0-$DE: GETC / RAMB / ROMB
+     * Normal: GETC (transfer ROM buffer to color register)
+     * ALT1: RAMB (set RAM bank from SREG)
+     * ALT2: ROMB (set ROM bank from SREG) */
     case 0xD0: case 0xD1: case 0xD2: case 0xD3:
     case 0xD4: case 0xD5: case 0xD6: case 0xD7:
     case 0xD8: case 0xD9: case 0xDA: case 0xDB:
     case 0xDC: case 0xDD: case 0xDE:
-        gsu_op_getc(gsu);
+        if (gsu->flag_alt1) {
+            gsu_op_ramb(gsu);
+        } else if (gsu->flag_alt2) {
+            gsu_op_romb(gsu);
+        } else {
+            gsu_op_getc(gsu);
+        }
         break;
     case 0xDF:
-        gsu_op_asr(gsu);
+        /* GETB / GETBH / GETBL / GETBS */
+        if (gsu->flag_alt1 && gsu->flag_alt2) {
+            gsu_op_getbs(gsu);         /* ALT3: signed byte */
+        } else if (gsu->flag_alt1) {
+            gsu_op_getbh(gsu);         /* ALT1: high byte */
+        } else if (gsu->flag_alt2) {
+            gsu_op_getbl(gsu);         /* ALT2: low byte */
+        } else {
+            gsu_op_getb(gsu);          /* normal: byte */
+        }
         break;
 
-    /* $E0-$EF: JMP / LJMP */
+    /* $E0-$EF: INC R0-R15 / DEC (ALT1) — another INC block?
+     * Actually: JMP Rn (normal) / LJMP (ALT1) for R0-R15 */
     case 0xE0: case 0xE1: case 0xE2: case 0xE3:
     case 0xE4: case 0xE5: case 0xE6: case 0xE7:
     case 0xE8: case 0xE9: case 0xEA: case 0xEB:
@@ -1150,43 +1223,15 @@ static void gsu_execute(Gsu *gsu, uint8_t op) {
         gsu_op_jmp(gsu, op & 0x0F);
         break;
 
-    /* $F0-$FF: LINK / SEX / etc */
+    /* $F0-$FF: IWT R0-R15, #ppqq — Immediate Word Transfer (3-byte)
+     * ALT1: LM R0-R15, (hhll) — load from RAM address
+     * ALT2: SM (hhll), R0-R15 — store to RAM address
+     * NOTE: Was mapped as SEX/LINK/NOP which was completely wrong! */
     case 0xF0: case 0xF1: case 0xF2: case 0xF3:
     case 0xF4: case 0xF5: case 0xF6: case 0xF7:
     case 0xF8: case 0xF9: case 0xFA: case 0xFB:
     case 0xFC: case 0xFD: case 0xFE: case 0xFF:
-        if (op == 0xF0) {
-            gsu_op_sex(gsu);
-        } else if (op >= 0xF1 && op <= 0xF4) {
-            gsu_op_link(gsu, op & 0x0F);
-        } else if (op == 0xF5) {
-            /* PLOT when alt1 set = RPIX */
-            if (gsu->flag_alt1) {
-                gsu_op_rpix(gsu);
-            } else {
-                gsu_op_plot(gsu);
-            }
-        } else if (op == 0xF6) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xF7) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xF8) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xF9) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xFA) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xFB) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xFC) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xFD) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else if (op == 0xFE) {
-            gsu_op_nop(gsu); /* undocumented */
-        } else {
-            gsu_op_nop(gsu); /* undocumented */
-        }
+        gsu_op_iwt(gsu, op & 0x0F);
         break;
     }
 
@@ -1390,9 +1435,11 @@ void gsu_cache_write(Gsu *gsu, uint16_t addr, uint8_t val) {
 void gsu_run(Gsu *gsu) {
     if (!gsu->flag_go) return;
 
-    /* Set a generous cycle limit to prevent infinite loops */
+    /* Set a generous cycle limit to prevent infinite loops.
+     * SuperFX 3D render programs need millions of cycles to complete
+     * a full frame (polygon rasterization, Z-buffer, etc.) */
     uint64_t start = gsu->cycles;
-    uint64_t limit = 65536;
+    uint64_t limit = 200000000;  /* 200M cycles — tile decompression needs many cycles */
 
     gsu_peekpipe(gsu);
 
