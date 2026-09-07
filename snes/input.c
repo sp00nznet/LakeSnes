@@ -64,21 +64,36 @@ static uint32_t mouse_build_packet(Input* input) {
   if(dy > 127) dy = 127;
   if(dy < -127) dy = -127;
 
+  // Direction bit is a negative-sign flag: 1 = left / up, 0 = right / down.
+  // (Verified against the Mario Paint ROM: with dx<0 reported as 0 the cursor
+  // moved right, so 0 is the positive direction.)
   uint8_t xSign = (dx < 0) ? 1 : 0;
   uint8_t xMag = (dx < 0) ? (uint8_t)(-dx) : (uint8_t)dx;
   uint8_t ySign = (dy < 0) ? 1 : 0;
   uint8_t yMag = (dy < 0) ? (uint8_t)(-dy) : (uint8_t)dy;
 
-  // 32-bit mouse packet (bit 31 read first):
-  // [31-24] 00 SS 0001  (S=speed, 0001=mouse signature)
-  // [23-16] RL 000000   (R=right, L=left button)
-  // [15-8]  D MMMMMMM   (D=Y sign, M=Y magnitude)
-  // [7-0]   D MMMMMMM   (D=X sign, M=X magnitude)
+  // 32-bit mouse packet, bit 31 read first (bit 31 = serial clock cycle 1).
+  // Layout per the SNES Mouse protocol (snes.nesdev.org/wiki/Mouse):
+  //   cycle 1-8   (bits 31-24)  zero
+  //   cycle 9     (bit 23)      LEFT button
+  //   cycle 10    (bit 22)      RIGHT button
+  //   cycle 11-12 (bits 21-20)  sensitivity (0=slow, 1=medium, 2=fast)
+  //   cycle 13-16 (bits 19-16)  controller ID nibble = 0001 for the mouse
+  //                             (a standard pad reports 0000). This lands in
+  //                             the low nibble of the auto-read word $4218,
+  //                             and is how the game decides a mouse is present
+  //                             and therefore clocks out the extra 16 movement
+  //                             bits. Without it the mouse reads as a joypad:
+  //                             buttons land on A/X and X/Y motion is never read.
+  //   cycle 17    (bit 15)      Y sign: 1 = up (negative dy)
+  //   cycle 18-24 (bits 14-8)   Y magnitude
+  //   cycle 25    (bit 7)       X sign: 1 = left (negative dx)
+  //   cycle 26-32 (bits 6-0)    X magnitude
   uint32_t data = 0;
-  data |= ((uint32_t)(input->mouseSpeed & 3)) << 28;
-  data |= ((uint32_t)1) << 24; // mouse signature
-  data |= ((uint32_t)((input->mouseButtons >> 1) & 1)) << 23; // right
-  data |= ((uint32_t)(input->mouseButtons & 1)) << 22;        // left
+  data |= ((uint32_t)(input->mouseButtons & 1)) << 23;        // left
+  data |= ((uint32_t)((input->mouseButtons >> 1) & 1)) << 22; // right
+  data |= ((uint32_t)(input->mouseSpeed & 3)) << 20;
+  data |= ((uint32_t)1) << 16;  // controller ID 0001 = SNES Mouse
   data |= ((uint32_t)ySign) << 15;
   data |= ((uint32_t)yMag) << 8;
   data |= ((uint32_t)xSign) << 7;
