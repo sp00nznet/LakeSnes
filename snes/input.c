@@ -75,8 +75,11 @@ static uint32_t mouse_build_packet(Input* input) {
   // 32-bit mouse packet, bit 31 read first (bit 31 = serial clock cycle 1).
   // Layout per the SNES Mouse protocol (snes.nesdev.org/wiki/Mouse):
   //   cycle 1-8   (bits 31-24)  zero
-  //   cycle 9     (bit 23)      LEFT button
-  //   cycle 10    (bit 22)      RIGHT button
+  //   cycle 9     (bit 23)      RIGHT button
+  //   cycle 10    (bit 22)      LEFT button
+  //                             (Right first. Mario Paint confirms it: its
+  //                             title accepts only a left click, $04CA bit 5,
+  //                             which it builds from bit 6 of $4218 = cycle 10.)
   //   cycle 11-12 (bits 21-20)  sensitivity (0=slow, 1=medium, 2=fast)
   //   cycle 13-16 (bits 19-16)  controller ID nibble = 0001 for the mouse
   //                             (a standard pad reports 0000). This lands in
@@ -90,8 +93,8 @@ static uint32_t mouse_build_packet(Input* input) {
   //   cycle 25    (bit 7)       X sign: 1 = left (negative dx)
   //   cycle 26-32 (bits 6-0)    X magnitude
   uint32_t data = 0;
-  data |= ((uint32_t)(input->mouseButtons & 1)) << 23;        // left
-  data |= ((uint32_t)((input->mouseButtons >> 1) & 1)) << 22; // right
+  data |= ((uint32_t)((input->mouseButtons >> 1) & 1)) << 23; // right
+  data |= ((uint32_t)(input->mouseButtons & 1)) << 22;        // left
   data |= ((uint32_t)(input->mouseSpeed & 3)) << 20;
   data |= ((uint32_t)1) << 16;  // controller ID 0001 = SNES Mouse
   data |= ((uint32_t)ySign) << 15;
