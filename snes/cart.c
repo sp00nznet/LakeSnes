@@ -66,6 +66,7 @@ bool cart_handleTypeState(Cart* cart, StateHandler* sh) {
 void cart_handleState(Cart* cart, StateHandler* sh) {
   if(cart->ram != NULL) sh_handleByteArray(sh, cart->ram, cart->ramSize);
   if(cart->type == 4 || cart->type == 5) dsp1_handleState(sh);
+  if(cart->gsu != NULL) gsu_handleState(cart->gsu, sh);
 }
 
 void cart_load(Cart* cart, int type, uint8_t* rom, int romSize, int ramSize) {
@@ -189,95 +190,52 @@ static void cart_writeHirom(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val)
 }
 
 /*
- * Super FX / GSU cartridge memory map (LoROM + SuperFX):
- *
- * $00-$3F:$3000-$303F  GSU I/O registers (when GSU is idle)
- * $00-$3F:$3100-$32FF  GSU cache RAM (512 bytes)
- * $00-$3F:$6000-$7FFF  Backup RAM (SRAM)
- * $00-$3F:$8000-$FFFF  ROM (LoROM mapping: bank*0x8000 + (adr & 0x7FFF))
- * $40-$5F:$0000-$FFFF  ROM (banks 0x40-0x5F map to upper ROM)
- * $60-$6F:$0000-$FFFF  GSU work RAM (64-128 KB, accessible when GSU idle)
- * $70-$71:$0000-$FFFF  GSU work RAM mirror
- * $80-$FF:             Mirrors of $00-$7F
+ * Super FX (GSU-2) cartridge, SNES side ("GSU2 Memory Map (at SNES Side)",
+ * fullsnes):
+ *   00-3F:3000-34FF  GSU registers (with mirrors) and 3100-32FF code cache
+ *   00-3F:6000-7FFF  first 8K of Game Pak RAM
+ *   00-3F:8000-FFFF  ROM, LoROM; 40-5F:0000-FFFF the same ROM, HiROM
+ *   60-71:0000-FFFF  Game Pak RAM (70-71 per fullsnes; 60-6F kept for older callers)
+ *   80-FF            mirrors
+ * While the GSU runs with SCMR.RON set, ROM reads return the fixed vector
+ * bytes (so IRQ/NMI land in WRAM); with SCMR.RAN set, RAM is not visible.
  */
 
+static uint8_t superfx_vector(uint16_t adr) {
+  if(adr & 1) return 0x01;
+  switch(adr & 0xe) {
+    case 0x4: return 0x04;
+    case 0xa: return 0x08;
+    case 0xe: return 0x0c;
+  }
+  return 0x00;
+}
+
+static uint8_t* superfx_ram(Cart* cart, uint8_t bank, uint16_t adr) {
+  Gsu* g = cart->gsu;
+  if(gsu_ownsRam(g)) return NULL;
+  if(bank < 0x40 && adr >= 0x6000 && adr < 0x8000) return &g->ram[(adr - 0x6000) & (g->ram_size - 1)];
+  if(bank >= 0x60 && bank < 0x72) return &g->ram[(((uint32_t)(bank & 0x0f) << 16) | adr) & (g->ram_size - 1)];
+  return NULL;
+}
+
 static uint8_t cart_readSuperFX(Cart* cart, uint8_t bank, uint16_t adr) {
-  uint8_t mbank = bank & 0x7F;  // mirror $80-$FF to $00-$7F
-
-  // GSU I/O registers: $00-$3F/$80-$BF : $3000-$303F
-  if(mbank < 0x40 && adr >= 0x3000 && adr < 0x3040 && cart->gsu) {
-    return gsu_read(cart->gsu, adr);
-  }
-
-  // GSU cache RAM: $00-$3F/$80-$BF : $3100-$32FF
-  if(mbank < 0x40 && adr >= 0x3100 && adr < 0x3300 && cart->gsu) {
-    return gsu_cache_read(cart->gsu, adr);
-  }
-
-  // GSU work RAM: $60-$71 : $0000-$FFFF (when GSU is not running)
-  // Banks $70-$71 also map to GSU work RAM on SuperFX carts
-  // (they share the same physical cartridge RAM)
-  if(mbank >= 0x60 && mbank < 0x72 && cart->gsu && cart->gsu->ram) {
-    uint32_t offset = ((uint32_t)(mbank & 0x0F) << 16) | adr;
-    return cart->gsu->ram[offset & (cart->gsu->ram_size - 1)];
-  }
-
-  // Fallback: Backup RAM (SRAM) at $70-$71 if no GSU
-  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
-    return cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)];
-  }
-
-  // ROM: $00-$3F/$80-$BF : $8000-$FFFF (LoROM mapping)
-  if(mbank < 0x40 && adr >= 0x8000) {
-    return cart->rom[((mbank << 15) | (adr & 0x7fff)) & (cart->romSize - 1)];
-  }
-
-  // ROM: $40-$5F/$C0-$DF : $0000-$FFFF (linear mapping)
-  if(mbank >= 0x40 && mbank < 0x60) {
-    return cart->rom[(((mbank - 0x40) << 16) | adr) & (cart->romSize - 1)];
-  }
-
-  // SRAM at $00-$3F:$6000-$7FFF (some Super FX games map SRAM here too)
-  if(mbank < 0x40 && adr >= 0x6000 && adr < 0x8000 && cart->ramSize > 0) {
-    return cart->ram[(((mbank & 0x3f) << 13) | (adr & 0x1fff)) & (cart->ramSize - 1)];
-  }
-
+  bank &= 0x7f;
+  if(bank < 0x40 && adr >= 0x3000 && adr < 0x3500) return gsu_read(cart->gsu, adr);
+  uint8_t* ram = superfx_ram(cart, bank, adr);
+  if(ram) return *ram;
+  bool rom = (bank < 0x40 && adr >= 0x8000) || (bank >= 0x40 && bank < 0x60);
+  if(rom && gsu_ownsRom(cart->gsu)) return superfx_vector(adr);
+  if(bank < 0x40 && adr >= 0x8000) return cart->rom[((bank << 15) | (adr & 0x7fff)) & (cart->romSize - 1)];
+  if(bank >= 0x40 && bank < 0x60) return cart->rom[(((bank - 0x40) << 16) | adr) & (cart->romSize - 1)];
   return cart->snes->openBus;
 }
 
 static void cart_writeSuperFX(Cart* cart, uint8_t bank, uint16_t adr, uint8_t val) {
-  uint8_t mbank = bank & 0x7F;
-
-  // GSU I/O registers: $00-$3F/$80-$BF : $3000-$303F
-  if(mbank < 0x40 && adr >= 0x3000 && adr < 0x3040 && cart->gsu) {
-    gsu_write(cart->gsu, adr, val);
-    return;
-  }
-
-  // GSU cache RAM: $00-$3F/$80-$BF : $3100-$32FF
-  if(mbank < 0x40 && adr >= 0x3100 && adr < 0x3300 && cart->gsu) {
-    gsu_cache_write(cart->gsu, adr, val);
-    return;
-  }
-
-  // GSU work RAM: $60-$71 : $0000-$FFFF
-  if(mbank >= 0x60 && mbank < 0x72 && cart->gsu && cart->gsu->ram) {
-    uint32_t offset = ((uint32_t)(mbank & 0x0F) << 16) | adr;
-    cart->gsu->ram[offset & (cart->gsu->ram_size - 1)] = val;
-    return;
-  }
-
-  // Fallback: Backup RAM (SRAM) at $70-$71 if no GSU
-  if((mbank >= 0x70 && mbank < 0x72) && cart->ramSize > 0) {
-    cart->ram[(((mbank & 0x01) << 16) | adr) & (cart->ramSize - 1)] = val;
-    return;
-  }
-
-  // SRAM at $00-$3F:$6000-$7FFF
-  if(mbank < 0x40 && adr >= 0x6000 && adr < 0x8000 && cart->ramSize > 0) {
-    cart->ram[(((mbank & 0x3f) << 13) | (adr & 0x1fff)) & (cart->ramSize - 1)] = val;
-    return;
-  }
+  bank &= 0x7f;
+  if(bank < 0x40 && adr >= 0x3000 && adr < 0x3500) { gsu_write(cart->gsu, adr, val); return; }
+  uint8_t* ram = superfx_ram(cart, bank, adr);
+  if(ram) *ram = val;
 }
 
 /*

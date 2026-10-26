@@ -157,6 +157,7 @@ void snes_syncCycles(Snes* snes, bool start, int syncCycles) {
 static void snes_runCycle(Snes* snes) {
   snes->apuCatchupCycles += (snes->palTiming ? apuCyclesPerMasterPal : apuCyclesPerMaster) * 2.0;
   snes->cycles += 2;
+  if(snes->cart->gsu) gsu_tick(snes->cart->gsu, 2);
   // check for h/v timer irq's
   bool condition = (
     (snes->vIrqEnabled || snes->hIrqEnabled) &&
@@ -333,7 +334,7 @@ static uint8_t snes_readReg(Snes* snes, uint16_t adr) {
     case 0x4211: {
       uint8_t val = snes->inIrq << 7;
       snes->inIrq = false;
-      cpu_setIrq(snes->cpu, false);
+      cpu_setIrq(snes->cpu, snes->cart->gsu && gsu_irqPending(snes->cart->gsu));
       return val | (snes->openBus & 0x7f);
     }
     case 0x4212: {
@@ -384,7 +385,7 @@ static void snes_writeReg(Snes* snes, uint16_t adr, uint8_t val) {
       snes->vIrqEnabled = val & 0x20;
       if(!snes->hIrqEnabled && !snes->vIrqEnabled) {
         snes->inIrq = false;
-        cpu_setIrq(snes->cpu, false);
+        cpu_setIrq(snes->cpu, snes->cart->gsu && gsu_irqPending(snes->cart->gsu));
       }
       // if nmi is enabled while inNmi is still set, immediately generate nmi
       if(!snes->nmiEnabled && (val & 0x80) && snes->inNmi) {
